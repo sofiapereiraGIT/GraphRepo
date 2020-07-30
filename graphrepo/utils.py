@@ -142,6 +142,9 @@ def format_file(file, project_id):
     return {
         'hash': get_file_hash(file, project_id),
         'name': file.filename,
+        'path': file.new_path if file.new_path else file.old_path,
+        'complexity': file.complexity if file.complexity else -1,
+        'current_methods': [met.long_name for met in file.methods],
         'project_id': project_id,
         'type': '.' + file.filename.split('.')[-1:][0]
     }
@@ -195,9 +198,26 @@ def format_method(met, fille, project_id):
     return {
         'hash': get_method_hash(met, fille, project_id),
         'name': met.name,
+        'long_name': met.long_name,
         'file_name': met.filename,
+        'nloc': met.nloc,
+        'complexity': met.complexity,
+        'parameters': met.parameters,
         'project_id': project_id}
 
 
 def format_file_method(f_hash, m_hash):
     return {'file_hash': f_hash, 'method_hash': m_hash}
+
+
+def format_blame(blame_dict, file):
+    return {
+        'hash': hashlib.sha224(str(file['path']+file['project_id']+"blame").encode('utf-8')).hexdigest(),
+        'name': "Blame::"+file['name'],
+        'filename': file['name'],
+        'project_id': file['project_id'],
+        'blame': str(blame_dict)}
+
+
+def format_file_blame(f_hash, b_hash):
+    return {'file_hash': f_hash, 'blame_hash': b_hash}

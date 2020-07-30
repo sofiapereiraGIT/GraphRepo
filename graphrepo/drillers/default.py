@@ -116,7 +116,7 @@ class DefaultDriller():
                 com_files.append(utl.format_commit_file(
                     com['hash'], fl_['hash'], file,
                     timestamp, self.config.ct.index_code))
-                for method in file.changed_methods:
+                for method in file.methods:
                     met = utl.format_method(
                         method, file, self.config.ct.project_id)
                     methods.append(met)

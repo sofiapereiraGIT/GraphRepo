@@ -93,7 +93,7 @@ class CacheDriller(DefaultDriller):
             self.config.check_config()
             self._check_connection()
             b_utl.index_cache(
-                self.graph, cache, batch_size=self.config.ct.batch_size)
+                self.config.ct.repo, self.graph, cache, batch_size=self.config.ct.batch_size)
         except Exception as exc:
             LG.log_and_raise(exc)
         else:

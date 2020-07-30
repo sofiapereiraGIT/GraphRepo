@@ -3,6 +3,9 @@ In contains all Neo4j queries for indexing the data in batches.
 More documentation will follow soon.
 """
 from datetime import datetime
+import hashlib
+import subprocess
+import graphrepo.utils as utl
 
 
 def batch(iterable, n=1):
@@ -82,7 +85,11 @@ def index_files(graph, files, batch_size=100):
     UNWIND {files} AS f
     MERGE (:File { hash: f.hash,
                    project_id: f.project_id,
-                   type:f.type, name: f.name})
+                   type:f.type,
+                   name: f.name,
+                   path: f.path,
+                   complexity: f.complexity,
+                   current_methods: f.current_methods})
     """
     for b in batch(files, batch_size):
         graph.run(query, files=b)
@@ -95,12 +102,59 @@ def index_methods(graph, methods, batch_size=100):
     MERGE (:Method { hash: f.hash,
                      project_id: f.project_id,
                      name: f.name,
-                     file_name: f.file_name})
+                     long_name: f.long_name,
+                     file_name: f.file_name,
+                     nloc: f.nloc,
+                     complexity: f.complexity,
+                     parameters: f.parameters
+                     })
     """
 
     for b in batch(methods, batch_size):
         graph.run(query, methods=b)
     create_index_methods(graph)
+
+
+def index_blame(repo_url, graph, files, batch_size=100):
+    blames = []
+    files_blames = []
+
+    for file in files:
+        cmd = 'cd {repo};' \
+              'git blame -w -M -C --line-porcelain "{fpath}"' \
+              '| sed -n \'s/^author-mail <//p\' | sed -n \'s/>//p\' | sort | uniq -c | sort -rn' \
+            .format(repo=repo_url, fpath=file['path'])
+
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True, stderr=subprocess.PIPE)
+        try:
+            blame = process.communicate()[0].decode("utf-8").split('\n')
+        except:  # ignores errors from files git sees as binary files, for example
+            blame = ['']
+
+        blame_dict = {}
+        if blame != ['']:
+            for line in blame:
+                if line != '':
+                    lines_developer = line.strip().split()
+                    blame_dict[lines_developer[1]] = lines_developer[0]
+
+        b = utl.format_blame(blame_dict, file)
+        blames.append(b)
+        files_blames.append(utl.format_file_blame(file['hash'], b['hash']))
+
+    query = """
+    UNWIND {blames} AS b
+    MERGE (:Blame { hash: b.hash,
+                   project_id: b.project_id,
+                   name: b.name,
+                   filename: b.filename,
+                   blame: b.blame})
+    """
+    for b in batch(blames, batch_size):
+        graph.run(query, blames=b)
+    create_index_blame(graph)
+
+    return files_blames
 
 
 def index_author_commits(graph, ac, batch_size=100):
@@ -135,6 +189,17 @@ def index_file_methods(graph, cf, batch_size=100):
     """
     for b in batch(cf, batch_size):
         graph.run(query, cf=b)
+
+
+def index_blame_file(graph, files_blames, batch_size=100):
+    query = """
+    UNWIND {files_blames} AS b
+    MATCH (x:Blame),(y:File)
+    WHERE x.hash = b.blame_hash AND y.hash = b.file_hash
+    MERGE (x)-[r:GitBlame{}]->(y)
+    """
+    for b in batch(files_blames, batch_size):
+        graph.run(query, files_blames=b)
 
 
 def index_commit_method(graph, cm, batch_size=100):
@@ -200,7 +265,18 @@ def create_index_methods(graph):
     graph.run(pid_q)
 
 
-def index_all(graph, developers, commits, parents, dev_commits, branches,
+def create_index_blame(graph):
+    hash_q = """
+        CREATE INDEX ON :Blame(hash)
+        """
+    pid_q = """
+        CREATE INDEX ON :Blame(project_id)
+        """
+    graph.run(hash_q)
+    graph.run(pid_q)
+
+
+def index_all(repo_url, graph, developers, commits, parents, dev_commits, branches,
               branches_commits, files, commit_files, methods, file_methods,
               commit_methods, batch_size=100):
 
@@ -237,6 +313,13 @@ def index_all(graph, developers, commits, parents, dev_commits, branches,
     index_methods(graph, methods, batch_size)
     print('Indexed methods in: \t', datetime.now()-start)
 
+    filesToBlame = list({v['hash']: v for v in files}.values())
+    print('Indexing ', len(filesToBlame), ' blames')
+    start = datetime.now()
+    files_blames = index_blame(repo_url, graph, filesToBlame, batch_size)
+    index_blame_file(graph, files_blames, batch_size)
+    print('Indexed blames in: \t', datetime.now() - start)
+
     parents = list({str(i): i for i in parents}.values())
     print('Indexing ', len(parents), ' parent commits')
     start = datetime.now()
@@ -267,7 +350,7 @@ def index_all(graph, developers, commits, parents, dev_commits, branches,
     print('Indexing took: \t', datetime.now()-total)
 
 
-def index_cache(graph, cache, batch_size=100):
+def index_cache(repo_url, graph, cache, batch_size=100):
     total = datetime.now()
     index_authors(graph, list(
         {v['hash']: v for v in cache.data['developers']}.values()), batch_size)
@@ -280,6 +363,11 @@ def index_cache(graph, cache, batch_size=100):
         {v['hash']: v for v in cache.data['files']}.values()), batch_size)
     index_methods(graph, list(
         {v['hash']: v for v in cache.data['methods']}.values()), batch_size)
+
+    filesToBlame = list({v['hash']: v for v in cache.data['files']}.values())
+    files_blames = index_blame(repo_url, graph, filesToBlame, batch_size)
+    index_blame_file(graph, files_blames, batch_size)
+
     index_parent_commits(graph, list(
         {str(i): i for i in cache.data['parents']}.values()), batch_size)
     index_author_commits(graph, cache.data['dev_commits'], batch_size)
