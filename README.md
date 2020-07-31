@@ -9,6 +9,11 @@ For a [demo](https://github.com/NullConvergence/GraphRepo-Demo) using Jupyter no
   <img src="https://raw.githubusercontent.com/NullConvergence/GraphRepo/develop/docs/source/GraphRepoSchema.svg">
 </p>
 
+New changes:
+- This version now has one more node called 'Blame', which contains the Git Blame analysis done to a file.
+Therefore, the Blame node connects to the a File node by a relation named 'GitBlame'.
+- All methods are added, instead of only adding the changed ones, due to the complexity analysis.
+
 ###  1. Installation & First run
 
 #### 1.1 Prereq
